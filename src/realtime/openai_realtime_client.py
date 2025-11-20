@@ -10,8 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import AsyncIterable, Callable, Iterable, Mapping, Optional
 
-import websockets
-from websockets import WebSocketClientProtocol
+from websockets.asyncio.client import ClientConnection, connect
 
 from src.audio.output_stream import AudioOutputStream
 from src.calendar.google_calendar_client import GoogleCalendarClient
@@ -48,7 +47,7 @@ class RealtimeSession:
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is required for RealtimeSession")
         self._api_key = api_key
-        self._ws: WebSocketClientProtocol | None = None
+        self._ws: ClientConnection | None = None
         self._recv_task: asyncio.Task[None] | None = None
         self._send_lock = asyncio.Lock()
         self._running = False
@@ -59,13 +58,13 @@ class RealtimeSession:
     async def __aenter__(self) -> "RealtimeSession":
         if self._connect:
             url = self._build_ws_url()
-            headers = {
-                "Authorization": f"Bearer {self._api_key}",
+            headers = [
+                ("Authorization", f"Bearer {self._api_key}"),
                 # Explicit beta header per API docs
-                "OpenAI-Beta": "realtime=v1",
-            }
+                ("OpenAI-Beta", "realtime=v1"),
+            ]
             self._logger.info("Opening realtime session to %s", url)
-            self._ws = await websockets.connect(url, extra_headers=headers)
+            self._ws = await connect(url, additional_headers=headers)
             await self._send_session_update()
             self._recv_task = asyncio.create_task(self._recv_loop())
             if self._output:
