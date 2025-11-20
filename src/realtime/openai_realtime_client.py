@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import AsyncIterable, Callable, Iterable, Mapping, Optional
 
+import numpy as np
 from websockets.asyncio.client import ClientConnection, connect
 
 from src.audio.output_stream import AudioOutputStream
@@ -53,6 +54,8 @@ class RealtimeSession:
         self._running = False
         self._connect = connect
         self._output = self._safe_build_output_stream(config)
+        # Realtime API は 24kHz 想定なので送信用にリサンプルする
+        self._target_sample_rate = 24_000
         self._state = SessionState()
 
     async def __aenter__(self) -> "RealtimeSession":
@@ -208,6 +211,7 @@ class RealtimeSession:
     async def _append_audio(self, frame: bytes) -> None:
         if not frame:
             return
+        frame = self._resample_if_needed(frame)
         await self._send_json(
             {
                 "type": "input_audio_buffer.append",
@@ -274,6 +278,22 @@ class RealtimeSession:
             return
         async with self._send_lock:
             await self._ws.send(json.dumps(payload))
+
+    def _resample_if_needed(self, frame: bytes) -> bytes:
+        """Resample PCM16 mono to 24kHz if input is at a lower rate (e.g., 16k)."""
+        src_rate = self._config.audio.sample_rate
+        dst_rate = self._target_sample_rate
+        if src_rate == dst_rate:
+            return frame
+        data = np.frombuffer(frame, dtype=np.int16)
+        ratio = dst_rate / src_rate
+        dst_len = int(len(data) * ratio)
+        if dst_len <= 0:
+            return frame
+        x = np.arange(len(data))
+        x_new = np.linspace(0, len(data) - 1, dst_len)
+        resampled = np.interp(x_new, x, data).astype(np.int16)
+        return resampled.tobytes()
 
 
 __all__ = ["RealtimeSession"]
