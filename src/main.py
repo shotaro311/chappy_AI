@@ -101,10 +101,9 @@ async def _run(config: AppConfig, dry_run: bool) -> None:
     if not audio_input:
         return
 
-    wake_listener = _build_wake_listener(config, audio_input)
-
     try:
         while True:
+            wake_listener = _build_wake_listener(config, audio_input)
             if wake_listener:
                 logger.info("Waiting for wake word ...")
                 await asyncio.to_thread(wake_listener.wait_for_wake_word)
@@ -122,9 +121,9 @@ async def _run(config: AppConfig, dry_run: bool) -> None:
                 logger.exception("Realtime session failed")
             finally:
                 logger.info("Session finished. Returning to wake loop")
+                if wake_listener:
+                    wake_listener.close()
     finally:
-        if wake_listener:
-            wake_listener.close()
         audio_input.close()
 
 

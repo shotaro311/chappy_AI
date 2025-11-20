@@ -6,6 +6,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from src.config.loader import AppConfig
+from src.util.logging_utils import get_logger
 
 try:  # pragma: no cover - optional dependency
     import sounddevice as sd
@@ -18,6 +19,7 @@ class AudioInputStream:
         if sd is None:  # pragma: no cover - runtime guard
             raise RuntimeError("sounddevice is required for AudioInputStream")
         self._config = config
+        self._logger = get_logger(__name__)
         self._default_frame_samples = int(config.audio.sample_rate * frame_duration_ms / 1000)
         self._active_frame_samples = self._default_frame_samples
         self._stream: Optional[sd.InputStream] = None  # type: ignore[attr-defined]
@@ -27,9 +29,17 @@ class AudioInputStream:
         self._callback = callback
         blocksize = frame_samples or self._default_frame_samples
         self._active_frame_samples = blocksize
+        self._logger.info(
+            "Opening mic stream: rate=%sHz, channels=%s, block=%s, device=%s",
+            self._config.audio.sample_rate,
+            self._config.audio.channels,
+            self._active_frame_samples,
+            self._config.audio.input_device or "default",
+        )
 
         def _sd_callback(indata, frames, time, status):  # pragma: no cover - hardware callback
             if status:
+                self._logger.debug("sounddevice status: %s", status)
                 return
             if self._callback:
                 self._callback(indata.copy().tobytes())
