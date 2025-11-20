@@ -11,7 +11,7 @@ from src.realtime.openai_realtime_client import RealtimeSession
 async def test_run_processes_tool_calls(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     config = load_config(app_env="pc.dev")
-    calendar = GoogleCalendarClient(config)
+    calendar = GoogleCalendarClient(config, use_in_memory=True)
     tool_call = {
         "name": "create_calendar_event",
         "arguments": {

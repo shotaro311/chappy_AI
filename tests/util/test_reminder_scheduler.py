@@ -7,7 +7,7 @@ from src.util.reminder_scheduler import ReminderScheduler
 
 def test_scheduler_detects_due_events():
     config = load_config(app_env="pc.dev")
-    calendar = GoogleCalendarClient(config)
+    calendar = GoogleCalendarClient(config, use_in_memory=True)
     scheduler = ReminderScheduler(calendar)
 
     now = datetime(2025, 11, 20, 9, 0, tzinfo=timezone.utc)

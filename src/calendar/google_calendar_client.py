@@ -22,18 +22,24 @@ class CalendarEvent:
     start: datetime
     end: datetime
     reminder_minutes: int = 10
-    event_id: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    event_id: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 class GoogleCalendarClient:
     """Talks to Google Calendar when credentials exist, otherwise stores events locally."""
 
-    def __init__(self, config: AppConfig, *, calendar_id: str | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        calendar_id: str | None = None,
+        use_in_memory: bool = False,
+    ) -> None:
         self._config = config
         self._calendar_id = calendar_id or "primary"
         self._logger = get_logger(__name__)
         self._memory_events: Dict[str, CalendarEvent] = {}
-        self._service = self._build_service_if_possible()
+        self._service = None if use_in_memory else self._build_service_if_possible()
 
     # ------------------------------------------------------------------
     # Public API

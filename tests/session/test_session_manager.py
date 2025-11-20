@@ -21,16 +21,18 @@ class FakeAudioInput:
 
 
 class DummyRealtime(RealtimeSession):
-    async def run(self, **kwargs):  # type: ignore[override]
-        # No-op during tests
-        pass
+    async def run(self, audio_source=None, **kwargs):  # type: ignore[override]
+        if audio_source is None:
+            return
+        async for _ in audio_source:
+            break
 
 
 @pytest.mark.asyncio
 async def test_session_manager_closes_audio(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     config = load_config(app_env="pc.dev")
-    calendar = GoogleCalendarClient(config)
+    calendar = GoogleCalendarClient(config, use_in_memory=True)
     realtime = DummyRealtime(config, calendar)
     audio = FakeAudioInput()
     manager = SessionManager(audio, realtime)

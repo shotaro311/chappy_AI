@@ -10,7 +10,7 @@ def test_upsert_and_list_in_memory(monkeypatch):
     monkeypatch.delenv("GOOGLE_REFRESH_TOKEN", raising=False)
 
     config = load_config(app_env="pc.dev")
-    client = GoogleCalendarClient(config)
+    client = GoogleCalendarClient(config, use_in_memory=True)
 
     start = datetime(2025, 11, 20, 10, 0, tzinfo=timezone.utc)
     client.upsert_event("テスト", start=start, duration_minutes=45, reminder_override=15)

@@ -1,3 +1,4 @@
+import src.wakeword.porcupine_listener as listener_module
 from src.config.loader import load_config
 from src.wakeword.porcupine_listener import WakeWordListener
 
@@ -36,9 +37,7 @@ class FakePorcupineModule:
 def test_wait_for_wake_word_uses_porcu_frame_length(monkeypatch):
     monkeypatch.setenv("PORCUPINE_ACCESS_KEY", "dummy")
     fake_module = FakePorcupineModule()
-    monkeypatch.setattr(
-        "src.wakeword.porcupine_listener.pvporcupine", fake_module, False
-    )
+    monkeypatch.setattr(listener_module, "pvporcupine", fake_module)
 
     config = load_config(app_env="pc.dev")
     audio = FakeAudioInputStream()
