@@ -21,7 +21,7 @@ async def test_run_processes_tool_calls(monkeypatch):
         },
     }
 
-    async with RealtimeSession(config, calendar) as session:
+    async with RealtimeSession(config, calendar, connect=False) as session:
         await session.run(tool_calls=[tool_call])
 
     events = calendar.list_upcoming()
