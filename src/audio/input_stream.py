@@ -1,0 +1,51 @@
+"""Microphone input abstraction."""
+from __future__ import annotations
+
+from typing import Callable, Optional
+
+import numpy as np
+
+from src.config.loader import AppConfig
+
+try:  # pragma: no cover - optional dependency
+    import sounddevice as sd
+except Exception:  # pragma: no cover - gracefully fail during tests
+    sd = None  # type: ignore
+
+
+class AudioInputStream:
+    def __init__(self, config: AppConfig, frame_duration_ms: int = 30) -> None:
+        if sd is None:  # pragma: no cover - runtime guard
+            raise RuntimeError("sounddevice is required for AudioInputStream")
+        self._config = config
+        self._frame_samples = int(config.audio.sample_rate * frame_duration_ms / 1000)
+        self._stream: Optional[sd.InputStream] = None  # type: ignore[attr-defined]
+        self._callback: Optional[Callable[[bytes], None]] = None
+
+    def open(self, callback: Callable[[bytes], None]) -> None:
+        self._callback = callback
+
+        def _sd_callback(indata, frames, time, status):  # pragma: no cover - hardware callback
+            if status:
+                return
+            if self._callback:
+                self._callback(indata.copy().tobytes())
+
+        self._stream = sd.InputStream(  # type: ignore[attr-defined]
+            channels=self._config.audio.channels,
+            samplerate=self._config.audio.sample_rate,
+            blocksize=self._frame_samples,
+            callback=_sd_callback,
+            dtype=np.int16,
+            device=self._config.audio.input_device,
+        )
+        self._stream.start()
+
+    def close(self) -> None:
+        if self._stream:
+            self._stream.stop()
+            self._stream.close()
+            self._stream = None
+
+
+__all__ = ["AudioInputStream"]

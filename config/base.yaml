@@ -1,0 +1,19 @@
+audio:
+  sample_rate: 16000
+  channels: 1
+timeouts:
+  utterance_timeout_sec: 5
+  session_timeout_sec: 10
+realtime:
+  model: gpt-realtime
+  endpoint: wss://api.openai.com/v1/realtime
+  max_session_minutes: 60
+  refresh_threshold_minutes: 30
+  server_vad_idle_timeout_sec: 10
+calendar:
+  reminder_minutes_default: 10
+  notification_method: push
+  polling_interval_fallback_min: 5
+logging:
+  level: INFO
+mode: dev
