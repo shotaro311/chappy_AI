@@ -1,6 +1,6 @@
 audio:
-  input_device: "Mac 内蔵マイク"
-  output_device: "Mac 内蔵スピーカー"
+  input_device: null
+  output_device: null
 logging:
   level: DEBUG
 mode: pc.dev

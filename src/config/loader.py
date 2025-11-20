@@ -73,7 +73,7 @@ def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[st
 def load_config(app_env: str | None = None, *, config_dir: Path | None = None) -> AppConfig:
     """Load configuration for the provided environment (defaults to APP_ENV)."""
 
-    load_dotenv()
+    load_dotenv(dotenv_path=PROJECT_ROOT / ".env", override=True)
     config_path = config_dir or DEFAULT_CONFIG_DIR
     env_name = app_env or os.getenv("APP_ENV", "pc.dev")
 
