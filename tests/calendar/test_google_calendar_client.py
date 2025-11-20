@@ -15,10 +15,12 @@ def test_upsert_and_list_in_memory(monkeypatch):
     start = datetime(2025, 11, 20, 10, 0, tzinfo=timezone.utc)
     client.upsert_event("テスト", start=start, duration_minutes=45, reminder_override=15)
 
-    events = client.list_upcoming()
+    # Use reference_time to test with a fixed time point
+    reference = start - timedelta(hours=1)
+    events = client.list_upcoming(reference_time=reference)
     assert len(events) == 1
     assert events[0].title == "テスト"
     assert events[0].reminder_minutes == 15
 
     client.delete_event(events[0].event_id)
-    assert client.list_upcoming() == []
+    assert client.list_upcoming(reference_time=reference) == []

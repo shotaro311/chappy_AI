@@ -25,7 +25,7 @@ class ReminderScheduler:
         """Yield events whose reminder window has started."""
 
         ref = reference or datetime.now(timezone.utc)
-        for event in self._calendar.list_upcoming():
+        for event in self._calendar.list_upcoming(reference_time=ref):
             start = _ensure_timezone(event.start)
             reminder_delta = timedelta(minutes=event.reminder_minutes)
             reminder_start = start - reminder_delta

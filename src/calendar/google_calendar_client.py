@@ -84,10 +84,11 @@ class GoogleCalendarClient:
             deleted = self._memory_events.pop(event_id)
             self._logger.info("Deleted event '%s'", deleted.title)
 
-    def list_upcoming(self) -> List[CalendarEvent]:
+    def list_upcoming(self, reference_time: datetime | None = None) -> List[CalendarEvent]:
+        now = reference_time or datetime.now(timezone.utc)
         if self._service:
             try:  # pragma: no cover - requires network
-                now_iso = datetime.now(timezone.utc).isoformat()
+                now_iso = now.isoformat()
                 events_result = (
                     self._service.events()
                     .list(
@@ -105,8 +106,7 @@ class GoogleCalendarClient:
                 self._logger.warning("Google Calendar list failed: %s", exc)
                 self._service = None
         # fall back to memory cache
-        now = datetime.utcnow()
-        return [evt for evt in self._memory_events.values() if evt.start >= now]
+        return [evt for evt in self._memory_events.values() if _ensure_timezone(evt.start) >= now]
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -162,6 +162,13 @@ class GoogleCalendarClient:
             reminder_minutes=reminder_minutes,
             event_id=item.get("id", ""),
         )
+
+
+def _ensure_timezone(value: datetime) -> datetime:
+    """Ensure datetime has timezone info (default to UTC if naive)."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 def _ensure_iso(value: datetime) -> str:

@@ -20,6 +20,7 @@ class SessionManager:
             await self._realtime.run(audio_source=self._audio_frames())
         finally:
             self._active = False
+            self._audio.close()
 
     async def _audio_frames(self) -> AsyncIterator[bytes]:
         queue: asyncio.Queue[bytes] = asyncio.Queue()
