@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, Awaitable, Callable
+from typing import AsyncIterator, Callable, Optional
 
 from src.audio.input_stream import AudioInputStream
 from src.realtime.openai_realtime_client import RealtimeSession
@@ -22,7 +22,7 @@ class SessionManager:
         def _on_frame(frame: bytes) -> None:
             queue.put_nowait(frame)
 
-        self._audio.open(_on_frame, frame_samples=None)
+        self._audio.open(_on_frame)
         try:
             while True:
                 frame = await queue.get()
