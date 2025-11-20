@@ -11,7 +11,7 @@ class ReminderArguments(BaseModel):
     """Function-call arguments for calendar reminders."""
 
     title: str
-    datetime: datetime = Field(alias="datetime")
+    scheduled_at: datetime = Field(alias="datetime")
     remind_before_minutes: int | None = None
 
 

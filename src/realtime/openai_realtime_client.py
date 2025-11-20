@@ -114,7 +114,7 @@ class RealtimeSession:
         args = tool_call.arguments
         event = self._calendar.upsert_event(
             title=args.title,
-            start=args.datetime,
+            start=args.scheduled_at,
             reminder_override=args.remind_before_minutes,
         )
         self._logger.info("Registered reminder '%s'", event.title)
