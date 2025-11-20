@@ -12,9 +12,14 @@ class SessionManager:
     def __init__(self, audio_input: AudioInputStream, realtime: RealtimeSession) -> None:
         self._audio = audio_input
         self._realtime = realtime
+        self._active = False
 
     async def run(self) -> None:
-        await self._realtime.run(audio_source=self._audio_frames())
+        self._active = True
+        try:
+            await self._realtime.run(audio_source=self._audio_frames())
+        finally:
+            self._active = False
 
     async def _audio_frames(self) -> AsyncIterator[bytes]:
         queue: asyncio.Queue[bytes] = asyncio.Queue()
