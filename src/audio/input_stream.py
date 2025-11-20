@@ -18,12 +18,15 @@ class AudioInputStream:
         if sd is None:  # pragma: no cover - runtime guard
             raise RuntimeError("sounddevice is required for AudioInputStream")
         self._config = config
-        self._frame_samples = int(config.audio.sample_rate * frame_duration_ms / 1000)
+        self._default_frame_samples = int(config.audio.sample_rate * frame_duration_ms / 1000)
+        self._active_frame_samples = self._default_frame_samples
         self._stream: Optional[sd.InputStream] = None  # type: ignore[attr-defined]
         self._callback: Optional[Callable[[bytes], None]] = None
 
-    def open(self, callback: Callable[[bytes], None]) -> None:
+    def open(self, callback: Callable[[bytes], None], *, frame_samples: Optional[int] = None) -> None:
         self._callback = callback
+        blocksize = frame_samples or self._default_frame_samples
+        self._active_frame_samples = blocksize
 
         def _sd_callback(indata, frames, time, status):  # pragma: no cover - hardware callback
             if status:
@@ -34,7 +37,7 @@ class AudioInputStream:
         self._stream = sd.InputStream(  # type: ignore[attr-defined]
             channels=self._config.audio.channels,
             samplerate=self._config.audio.sample_rate,
-            blocksize=self._frame_samples,
+            blocksize=self._active_frame_samples,
             callback=_sd_callback,
             dtype=np.int16,
             device=self._config.audio.input_device,

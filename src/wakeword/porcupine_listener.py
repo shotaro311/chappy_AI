@@ -28,11 +28,15 @@ class WakeWordListener:
             access_key=access_key,
             keyword_paths=list(keyword_paths or []),
         )
+        self._frame_length = self._porcupine.frame_length
         self._wake_event = threading.Event()
 
     def wait_for_wake_word(self) -> None:
         self._wake_event.clear()
-        self._audio_stream.open(self._process_frame)
+        self._audio_stream.open(
+            self._process_frame,
+            frame_samples=self._frame_length,
+        )
         self._wake_event.wait()
         self._audio_stream.close()
 
