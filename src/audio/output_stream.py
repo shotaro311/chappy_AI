@@ -23,6 +23,7 @@ class AudioOutputStream:
         self._stream: Optional[sd.OutputStream] = None  # type: ignore[attr-defined]
 
     def open(self) -> None:
+        print(f"[AudioOutputStream] Opening stream: rate={self._output_sample_rate}, device={self._config.audio.output_device}")
         self._stream = sd.OutputStream(  # type: ignore[attr-defined]
             channels=self._config.audio.channels,
             samplerate=self._output_sample_rate,
@@ -30,15 +31,18 @@ class AudioOutputStream:
             device=self._config.audio.output_device,
         )
         self._stream.start()
+        print("[AudioOutputStream] Stream started")
 
     def play(self, pcm: bytes) -> None:
         if not self._stream:
             raise RuntimeError("AudioOutputStream is not open")
         array = np.frombuffer(pcm, dtype=np.int16)
+        print(f"[AudioOutputStream] Playing {len(array)} samples")
         self._stream.write(array)
 
     def close(self) -> None:
         if self._stream:
+            print("[AudioOutputStream] Closing stream")
             self._stream.stop()
             self._stream.close()
             self._stream = None

@@ -30,7 +30,8 @@ class RealtimeConfig(BaseModel):
     endpoint: str
     max_session_minutes: int = 60
     refresh_threshold_minutes: int = 30
-    server_vad_idle_timeout_sec: int = 10
+    server_vad_idle_timeout_sec: float = 2.0
+    silence_timeout_sec: float = 6.0
 
 
 class CalendarConfig(BaseModel):

@@ -56,7 +56,16 @@ class RealtimeSession:
         self._output = self._safe_build_output_stream(config)
         # Realtime API は 24kHz 想定なので送信用にリサンプルする
         self._target_sample_rate = 24_000
+        self._target_sample_rate = 24_000
         self._state = SessionState()
+        self._audio_queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self._audio_player_task: asyncio.Task[None] | None = None
+        self._speech_started_at: float | None = None
+        self._force_commit_after_sec = 2.0
+        self._last_audio_activity: float | None = None
+        self._silence_timeout_sec = config.realtime.silence_timeout_sec
+        self._silence_monitor_task: asyncio.Task[None] | None = None
+        self._ai_is_responding: bool = False  # Track if AI is currently responding
 
     async def __aenter__(self) -> "RealtimeSession":
         if self._connect:
@@ -70,9 +79,17 @@ class RealtimeSession:
             self._ws = await connect(url, additional_headers=headers)
             await self._send_session_update()
             self._recv_task = asyncio.create_task(self._recv_loop())
+            self._silence_monitor_task = asyncio.create_task(self._silence_monitor_loop())
             if self._output:
-                with contextlib.suppress(Exception):
+                try:
                     self._output.open()
+                    self._logger.info("AudioOutputStream opened successfully")
+                except Exception as e:
+                    self._logger.error("Failed to open AudioOutputStream: %s", e, exc_info=True)
+                    # If output stream fails to open, disable audio output
+                    self._output = None
+                if self._output:
+                    self._audio_player_task = asyncio.create_task(self._player_loop())
         else:
             self._logger.info("Realtime connection skipped (connect=False)")
         self._running = True
@@ -87,9 +104,19 @@ class RealtimeSession:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._recv_task
             self._recv_task = None
+        if self._silence_monitor_task:
+            self._silence_monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._silence_monitor_task
+            self._silence_monitor_task = None
         if self._ws:
             await self._ws.close()
             self._ws = None
+        if self._audio_player_task:
+            self._audio_player_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._audio_player_task
+            self._audio_player_task = None
         if self._output:
             self._output.close()
         if self._running:
@@ -153,11 +180,21 @@ class RealtimeSession:
         if not audio_source:
             await asyncio.sleep(0)
             return
+        
         async for frame in audio_source:
             if not self._running:
                 break
             self.ingest_audio_frame(frame)
             await self._append_audio(frame)
+            
+            # Force commit if speech is too long (handling noisy environments)
+            if self._speech_started_at:
+                elapsed = time.monotonic() - self._speech_started_at
+                if elapsed > self._force_commit_after_sec:
+                    self._logger.info("Force committing audio after %.1fs", elapsed)
+                    await self._send_json({"type": "input_audio_buffer.commit"})
+                    self._speech_started_at = None
+
             # Yield control to avoid starving receiver
             await asyncio.sleep(0)
 
@@ -188,7 +225,8 @@ class RealtimeSession:
         try:
             # Realtime API uses 24kHz audio, so use 24kHz for output
             return AudioOutputStream(config, output_sample_rate=24_000)
-        except Exception:
+        except Exception as e:
+            self._logger.warning("Failed to initialize AudioOutputStream: %s", e)
             # 音声出力デバイスが無い環境では黙って無効化
             return None
 
@@ -199,7 +237,9 @@ class RealtimeSession:
             "session": {
                 "turn_detection": {
                     "type": "server_vad",
-                    "silence_duration_ms": self._config.realtime.server_vad_idle_timeout_sec * 1000,
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": int(self._config.realtime.server_vad_idle_timeout_sec * 1000),
                 },
                 "input_audio_format": "pcm16",
                 "output_audio_format": "pcm16",
@@ -248,11 +288,53 @@ class RealtimeSession:
             self._logger.exception("Realtime receive loop failed")
             self._running = False
 
+    async def _silence_monitor_loop(self) -> None:
+        """Monitor silence and auto-close session after timeout."""
+        self._logger.info("Silence monitor loop started")
+        try:
+            while self._running:
+                await asyncio.sleep(1)  # Check every second
+                
+                if self._last_audio_activity is not None and not self._ai_is_responding:
+                    silence_duration = time.monotonic() - self._last_audio_activity
+                    if silence_duration > self._silence_timeout_sec:
+                        self._logger.info("Session auto-closing after %.1fs of silence", silence_duration)
+                        self._running = False
+                        break
+        except asyncio.CancelledError:
+            self._logger.info("Silence monitor loop cancelled")
+        except Exception:
+            self._logger.exception("Silence monitor loop failed")
+        finally:
+            self._logger.info("Silence monitor loop finished")
+
     async def _handle_event(self, event: Mapping[str, object]) -> None:
         event_type = event.get("type", "")
+        if event_type == "input_audio_buffer.speech_started":
+            self._logger.debug("Event: speech_started")
+            self._speech_started_at = time.monotonic()
+            self._last_audio_activity = time.monotonic()  # Reset silence timer on speech
+            return
+        if event_type == "input_audio_buffer.speech_stopped":
+            self._logger.debug("Event: speech_stopped")
+            self._speech_started_at = None
+            self._last_audio_activity = time.monotonic()  # Start silence timer
+            return
         if event_type == "input_audio_buffer.committed":
+            self._logger.info("Event: input_audio_buffer.committed (ID: %s)", event.get("item_id"))
+            self._speech_started_at = None
+            self._last_audio_activity = time.monotonic()  # Reset on commit
             # サーバーが音声入力を1発話として確定 → 応答生成を明示
             await self._send_response_create()
+            return
+        if event_type == "response.created":
+            self._logger.info("Event: response.created (ID: %s)", event.get("response", {}).get("id"))
+            self._ai_is_responding = True
+            return
+        if event_type == "response.done":
+            self._logger.info("Event: response.done")
+            self._ai_is_responding = False
+            self._last_audio_activity = time.monotonic()  # Reset silence timer after AI finishes
             return
         if event_type in ("response.text.delta", "response.output_text.delta", "response.output_text.done"):
             delta = event.get("delta") or event.get("text")
@@ -271,13 +353,18 @@ class RealtimeSession:
                 self._logger.info("AI (full): %s", transcript)
             return
         if event_type in ("response.audio.delta", "response.output_audio.delta"):
-            audio_base64 = event.get("audio")
+            # Log raw event to see actual structure
+            self._logger.debug("RAW AUDIO EVENT: %s", dict(event))
+            audio_base64 = event.get("audio") or event.get("delta")
+            self._logger.debug("Received audio delta event, has_audio=%s, has_output=%s", bool(audio_base64), bool(self._output))
             if audio_base64 and self._output:
                 try:
-                    self._output.play(base64.b64decode(audio_base64))
+                    # Queue audio for playback to avoid blocking the websocket loop
+                    audio_bytes = base64.b64decode(audio_base64)
+                    self._audio_queue.put_nowait(audio_bytes)
+                    self._logger.debug("Queued %d bytes of audio (queue size now: %d)", len(audio_bytes), self._audio_queue.qsize())
                 except Exception as exc:
-                    # 再生失敗しても処理は継続
-                    self._logger.warning("Audio playback failed: %s", exc)
+                    self._logger.warning("Failed to queue audio: %s", exc)
             return
         if event_type == "error":
             self._logger.error("Realtime error: %s", event)
@@ -306,6 +393,31 @@ class RealtimeSession:
         x_new = np.linspace(0, len(data) - 1, dst_len)
         resampled = np.interp(x_new, x, data).astype(np.int16)
         return resampled.tobytes()
+
+    async def _player_loop(self) -> None:
+        """Background task to play queued audio chunks."""
+        if not self._output:
+            return
+        self._logger.info("Audio player loop started")
+        try:
+            while True:
+                self._logger.debug("Waiting for audio chunk from queue (size=%d)", self._audio_queue.qsize())
+                chunk = await self._audio_queue.get()
+                self._logger.debug("Got audio chunk of %d bytes, playing...", len(chunk))
+                try:
+                    # Run blocking play in a thread to avoid blocking the event loop
+                    await asyncio.to_thread(self._output.play, chunk)
+                    self._logger.debug("Audio chunk played successfully")
+                except Exception as exc:
+                    self._logger.warning("Audio playback failed: %s", exc)
+                finally:
+                    self._audio_queue.task_done()
+        except asyncio.CancelledError:
+            self._logger.info("Audio player loop cancelled")
+        except Exception:
+            self._logger.exception("Audio player loop failed")
+        finally:
+            self._logger.info("Audio player loop finished")
 
 
 __all__ = ["RealtimeSession"]
