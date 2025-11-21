@@ -66,6 +66,7 @@ class RealtimeSession:
         self._silence_timeout_sec = config.realtime.silence_timeout_sec
         self._silence_monitor_task: asyncio.Task[None] | None = None
         self._ai_is_responding: bool = False  # Track if AI is currently responding
+        self._is_playing: bool = False  # Track if audio is currently being played
 
     async def __aenter__(self) -> "RealtimeSession":
         if self._connect:
@@ -172,9 +173,11 @@ class RealtimeSession:
             return
         self._vad.update(frame, self._config.audio.sample_rate)
         self._state.last_activity_at = time.monotonic()
-        if self._vad.should_end_session():
-            self._running = False
-            raise SessionTimeoutError("No speech detected")
+        # Local VAD timeout check is disabled because it doesn't account for AI response time.
+        # We rely on _silence_monitor_loop instead.
+        # if self._vad.should_end_session():
+        #     self._running = False
+        #     raise SessionTimeoutError("No speech detected")
 
     async def _run_audio_loop(self, audio_source: AsyncIterable[bytes] | None) -> None:
         if not audio_source:
@@ -237,7 +240,7 @@ class RealtimeSession:
             "session": {
                 "turn_detection": {
                     "type": "server_vad",
-                    "threshold": 0.5,
+                    "threshold": 0.6,
                     "prefix_padding_ms": 300,
                     "silence_duration_ms": int(self._config.realtime.server_vad_idle_timeout_sec * 1000),
                 },
@@ -295,7 +298,17 @@ class RealtimeSession:
             while self._running:
                 await asyncio.sleep(1)  # Check every second
                 
-                if self._last_audio_activity is not None and not self._ai_is_responding:
+                # Check if we should timeout
+                # We only timeout if:
+                # 1. AI is NOT generating a response
+                # 2. We are NOT playing back audio
+                # 3. Silence duration has exceeded the limit
+                if (
+                    self._last_audio_activity is not None
+                    and not self._ai_is_responding
+                    and not self._is_playing
+                    and self._audio_queue.empty()
+                ):
                     silence_duration = time.monotonic() - self._last_audio_activity
                     if silence_duration > self._silence_timeout_sec:
                         self._logger.info("Session auto-closing after %.1fs of silence", silence_duration)
@@ -311,9 +324,24 @@ class RealtimeSession:
     async def _handle_event(self, event: Mapping[str, object]) -> None:
         event_type = event.get("type", "")
         if event_type == "input_audio_buffer.speech_started":
-            self._logger.debug("Event: speech_started")
+            self._logger.info("Event: speech_started (Interruption detected)")
             self._speech_started_at = time.monotonic()
-            self._last_audio_activity = time.monotonic()  # Reset silence timer on speech
+            self._last_audio_activity = time.monotonic()
+            
+            # Interruption handling:
+            # 1. Clear local audio queue to stop playback immediately
+            while not self._audio_queue.empty():
+                try:
+                    self._audio_queue.get_nowait()
+                    self._audio_queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+            
+            # 2. Send cancel to server to stop generation
+            if self._ai_is_responding:
+                self._logger.info("Cancelling AI response due to interruption")
+                await self._send_json({"type": "response.cancel"})
+            
             return
         if event_type == "input_audio_buffer.speech_stopped":
             self._logger.debug("Event: speech_stopped")
@@ -405,12 +433,16 @@ class RealtimeSession:
                 chunk = await self._audio_queue.get()
                 self._logger.debug("Got audio chunk of %d bytes, playing...", len(chunk))
                 try:
+                    self._is_playing = True
                     # Run blocking play in a thread to avoid blocking the event loop
                     await asyncio.to_thread(self._output.play, chunk)
                     self._logger.debug("Audio chunk played successfully")
+                    # Update activity time after playback to reset silence timer
+                    self._last_audio_activity = time.monotonic()
                 except Exception as exc:
                     self._logger.warning("Audio playback failed: %s", exc)
                 finally:
+                    self._is_playing = False
                     self._audio_queue.task_done()
         except asyncio.CancelledError:
             self._logger.info("Audio player loop cancelled")
