@@ -1,0 +1,6 @@
+audio:
+  input_device: "USB Audio Device"
+  output_device: "USB Speaker"
+logging:
+  level: INFO
+mode: rpi.prod

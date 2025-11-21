@@ -1,0 +1,6 @@
+audio:
+  input_device: null
+  output_device: null
+logging:
+  level: DEBUG
+mode: pc.dev
