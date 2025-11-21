@@ -39,10 +39,12 @@ class AudioInputStream:
 
         def _sd_callback(indata, frames, time, status):  # pragma: no cover - hardware callback
             if status:
-                self._logger.debug("sounddevice status: %s", status)
+                self._logger.warning("sounddevice status: %s", status)
                 return
             if self._callback:
                 self._callback(indata.copy().tobytes())
+            else:
+                self._logger.warning("Mic callback called but no callback set")
 
         self._stream = sd.InputStream(  # type: ignore[attr-defined]
             channels=self._config.audio.channels,

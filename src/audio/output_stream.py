@@ -14,16 +14,18 @@ except Exception:  # pragma: no cover
 
 
 class AudioOutputStream:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, output_sample_rate: int | None = None) -> None:
         if sd is None:  # pragma: no cover - runtime guard
             raise RuntimeError("sounddevice is required for AudioOutputStream")
         self._config = config
+        # Allow overriding output sample rate (e.g., for 24kHz Realtime API audio)
+        self._output_sample_rate = output_sample_rate or config.audio.sample_rate
         self._stream: Optional[sd.OutputStream] = None  # type: ignore[attr-defined]
 
     def open(self) -> None:
         self._stream = sd.OutputStream(  # type: ignore[attr-defined]
             channels=self._config.audio.channels,
-            samplerate=self._config.audio.sample_rate,
+            samplerate=self._output_sample_rate,
             dtype=np.int16,
             device=self._config.audio.output_device,
         )

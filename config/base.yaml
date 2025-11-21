@@ -9,7 +9,7 @@ realtime:
   endpoint: wss://api.openai.com/v1/realtime
   max_session_minutes: 60
   refresh_threshold_minutes: 30
-  server_vad_idle_timeout_sec: 10
+  server_vad_idle_timeout_sec: 2
 calendar:
   reminder_minutes_default: 10
   notification_method: push

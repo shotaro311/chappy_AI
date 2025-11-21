@@ -29,8 +29,10 @@ class SessionManager:
             queue.put_nowait(frame)
 
         self._audio.open(_on_frame)
+        # Give time for audio stream to initialize
+        await asyncio.sleep(0.1)
         try:
-            while True:
+            while self._active:
                 frame = await queue.get()
                 yield frame
         finally:

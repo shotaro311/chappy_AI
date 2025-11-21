@@ -186,7 +186,8 @@ class RealtimeSession:
 
     def _safe_build_output_stream(self, config: AppConfig) -> AudioOutputStream | None:
         try:
-            return AudioOutputStream(config)
+            # Realtime API uses 24kHz audio, so use 24kHz for output
+            return AudioOutputStream(config, output_sample_rate=24_000)
         except Exception:
             # 音声出力デバイスが無い環境では黙って無効化
             return None
@@ -258,14 +259,25 @@ class RealtimeSession:
             if delta:
                 self._logger.info("AI: %s", delta)
             return
+        # Audio transcript events (for text display of audio responses)
+        if event_type == "response.audio_transcript.delta":
+            delta = event.get("delta")
+            if delta:
+                self._logger.info("AI: %s", delta)
+            return
+        if event_type == "response.audio_transcript.done":
+            transcript = event.get("transcript")
+            if transcript:
+                self._logger.info("AI (full): %s", transcript)
+            return
         if event_type in ("response.audio.delta", "response.output_audio.delta"):
             audio_base64 = event.get("audio")
             if audio_base64 and self._output:
                 try:
                     self._output.play(base64.b64decode(audio_base64))
-                except Exception:
+                except Exception as exc:
                     # 再生失敗しても処理は継続
-                    self._logger.debug("Audio playback skipped (device issue)")
+                    self._logger.warning("Audio playback failed: %s", exc)
             return
         if event_type == "error":
             self._logger.error("Realtime error: %s", event)
