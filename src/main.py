@@ -7,11 +7,13 @@ import os
 from pathlib import Path
 
 from src.audio.input_stream import AudioInputStream
-from src.calendar.google_calendar_client import GoogleCalendarClient
+from src.gcal.google_calendar_client import GoogleCalendarClient
 from src.config.loader import AppConfig, load_config
 from src.realtime.openai_realtime_client import RealtimeSession
 from src.session.manager import SessionManager
 from src.util.logging_utils import configure_logging, get_logger
+from src.util.logging_utils import configure_logging, get_logger
+from src.util.reminder_scheduler import ReminderScheduler
 from src.vad.vad_detector import VADDetector
 from src.wakeword.porcupine_listener import WakeWordListener
 
@@ -115,7 +117,8 @@ async def _run(config: AppConfig, dry_run: bool) -> None:
 
             try:
                 async with RealtimeSession(config, calendar_client, vad) as session:
-                    manager = SessionManager(audio_input, session)
+                    scheduler = ReminderScheduler(calendar_client)
+                    manager = SessionManager(audio_input, session, scheduler)
                     await manager.run()
             except Exception:
                 logger.exception("Realtime session failed")

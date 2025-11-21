@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from src.calendar.google_calendar_client import GoogleCalendarClient
+from src.gcal.google_calendar_client import CalendarEvent, GoogleCalendarClient
 from src.config.loader import load_config
 
 

@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from src.calendar.google_calendar_client import GoogleCalendarClient
+from src.gcal.google_calendar_client import GoogleCalendarClient
 from src.config.loader import load_config
 from src.realtime.openai_realtime_client import RealtimeSession
 from src.session.manager import SessionManager

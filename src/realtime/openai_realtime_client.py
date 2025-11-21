@@ -14,9 +14,9 @@ import numpy as np
 from websockets.asyncio.client import ClientConnection, connect
 
 from src.audio.output_stream import AudioOutputStream
-from src.calendar.google_calendar_client import GoogleCalendarClient
+from src.gcal.google_calendar_client import GoogleCalendarClient
 from src.config.loader import AppConfig
-from src.realtime.schema import ReminderToolCall
+from src.realtime.schema import CalendarToolCall, ReminderArguments, DeleteEventArguments, ListEventsArguments
 from src.util.logging_utils import get_logger
 from src.vad.vad_detector import VADDetector
 
@@ -38,7 +38,7 @@ class RealtimeSession:
         calendar_client: GoogleCalendarClient,
         vad: Optional[VADDetector] = None,
         *,
-        connect: bool = True,
+        start_connection: bool = True,
     ) -> None:
         self._config = config
         self._calendar = calendar_client
@@ -52,7 +52,7 @@ class RealtimeSession:
         self._recv_task: asyncio.Task[None] | None = None
         self._send_lock = asyncio.Lock()
         self._running = False
-        self._connect = connect
+        self._start_connection = start_connection
         self._output = self._safe_build_output_stream(config)
         # Realtime API は 24kHz 想定なので送信用にリサンプルする
         self._target_sample_rate = 24_000
@@ -69,7 +69,7 @@ class RealtimeSession:
         self._is_playing: bool = False  # Track if audio is currently being played
 
     async def __aenter__(self) -> "RealtimeSession":
-        if self._connect:
+        if self._start_connection:
             url = self._build_ws_url()
             headers = [
                 ("Authorization", f"Bearer {self._api_key}"),
@@ -92,7 +92,7 @@ class RealtimeSession:
                 if self._output:
                     self._audio_player_task = asyncio.create_task(self._player_loop())
         else:
-            self._logger.info("Realtime connection skipped (connect=False)")
+            self._logger.info("Realtime connection skipped (start_connection=False)")
         self._running = True
         return self
 
@@ -205,17 +205,56 @@ class RealtimeSession:
         if not tool_calls:
             return
         for payload in tool_calls:
-            tool_call = ReminderToolCall.model_validate(payload)
-            self._handle_reminder_call(tool_call)
+            tool_call = CalendarToolCall.model_validate(payload)
+            if tool_call.name == "schedule_reminder":
+                self._handle_reminder_call(tool_call.arguments)
+            elif tool_call.name == "delete_calendar_event":
+                self._handle_delete_call(tool_call.arguments)
+            elif tool_call.name == "list_calendar_events":
+                self._handle_list_call(tool_call.arguments)
 
-    def _handle_reminder_call(self, tool_call: ReminderToolCall) -> None:
-        args = tool_call.arguments
+    def _handle_reminder_call(self, args: ReminderArguments) -> None:
         event = self._calendar.upsert_event(
             title=args.title,
             start=args.scheduled_at,
             reminder_override=args.remind_before_minutes,
         )
         self._logger.info("Registered reminder '%s'", event.title)
+        asyncio.create_task(self.stream_text(f"予定「{event.title}」を登録しました。"))
+
+    def _handle_delete_call(self, args: DeleteEventArguments) -> None:
+        event = self._calendar.find_event_by_title(args.title)
+        if event:
+            self._calendar.delete_event(event.event_id)
+            self._logger.info("Deleted event '%s'", event.title)
+            asyncio.create_task(self.stream_text(f"予定「{event.title}」を削除しました。"))
+        else:
+            self._logger.info("Event '%s' not found for deletion", args.title)
+            asyncio.create_task(self.stream_text(f"予定「{args.title}」が見つかりませんでした。"))
+
+    def _handle_list_call(self, args: ListEventsArguments) -> None:
+        from datetime import datetime, timedelta, timezone
+        
+        if args.date:
+            try:
+                start_date = datetime.strptime(args.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                end_date = start_date + timedelta(days=1)
+                events = self._calendar.list_events(start_date, end_date)
+                date_str = args.date
+            except ValueError:
+                asyncio.create_task(self.stream_text("日付の形式が正しくありません。"))
+                return
+        else:
+            events = self._calendar.list_upcoming()
+            date_str = "今後"
+
+        if not events:
+            msg = f"{date_str}の予定はありません。"
+        else:
+            lines = [f"{e.start.strftime('%H:%M')} {e.title}" for e in events]
+            msg = f"{date_str}の予定は{len(events)}件あります。\n" + "\n".join(lines)
+        
+        asyncio.create_task(self.stream_text(msg))
 
     # ---------------- internal helpers ----------------
 
@@ -248,6 +287,45 @@ class RealtimeSession:
                 "output_audio_format": "pcm16",
                 "modalities": ["text", "audio"],
                 "instructions": "You are a concise Japanese assistant that manages calendar reminders.",
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "schedule_reminder",
+                        "description": "Schedule a calendar reminder.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "datetime": {"type": "string", "description": "ISO 8601 datetime"},
+                                "remind_before_minutes": {"type": "integer"},
+                            },
+                            "required": ["title", "datetime"],
+                        },
+                    },
+                    {
+                        "type": "function",
+                        "name": "delete_calendar_event",
+                        "description": "Delete a calendar event by title.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string", "description": "Title of the event to delete"},
+                            },
+                            "required": ["title"],
+                        },
+                    },
+                    {
+                        "type": "function",
+                        "name": "list_calendar_events",
+                        "description": "List calendar events for a specific date or range.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "date": {"type": "string", "description": "YYYY-MM-DD date to list events for. If omitted, lists upcoming events."},
+                            },
+                        },
+                    },
+                ],
             },
         }
         await self._send_json(payload)

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Iterator, List
 
-from src.calendar.google_calendar_client import CalendarEvent, GoogleCalendarClient
+from src.gcal.google_calendar_client import CalendarEvent, GoogleCalendarClient
 from src.util.logging_utils import get_logger
 
 

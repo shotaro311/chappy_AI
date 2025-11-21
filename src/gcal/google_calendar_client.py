@@ -108,6 +108,45 @@ class GoogleCalendarClient:
         # fall back to memory cache
         return [evt for evt in self._memory_events.values() if _ensure_timezone(evt.start) >= now]
 
+    def list_events(self, start_date: datetime, end_date: datetime) -> List[CalendarEvent]:
+        """List events within a specific date range."""
+        if self._service:
+            try:
+                events_result = (
+                    self._service.events()
+                    .list(
+                        calendarId=self._calendar_id,
+                        timeMin=start_date.isoformat(),
+                        timeMax=end_date.isoformat(),
+                        singleEvents=True,
+                        orderBy="startTime",
+                    )
+                    .execute()
+                )
+                items = events_result.get("items", [])
+                return [self._from_api_item(item) for item in items]
+            except HttpError as exc:
+                self._logger.warning("Google Calendar list range failed: %s", exc)
+                self._service = None
+        
+        # Memory fallback
+        results = []
+        for evt in self._memory_events.values():
+            s = _ensure_timezone(evt.start)
+            if start_date <= s < end_date:
+                results.append(evt)
+        return sorted(results, key=lambda x: x.start)
+
+    def find_event_by_title(self, title: str) -> Optional[CalendarEvent]:
+        """Find the first upcoming event matching the title (fuzzy match could be added later)."""
+        # For now, simple case-insensitive substring match on upcoming events
+        upcoming = self.list_upcoming()
+        title_lower = title.lower()
+        for event in upcoming:
+            if title_lower in event.title.lower():
+                return event
+        return None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
